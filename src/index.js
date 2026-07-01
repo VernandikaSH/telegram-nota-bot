@@ -8,7 +8,7 @@ const { handleCallback } = require('./handlers/callbackHandler');
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const WEBHOOK_URL = process.env.WEBHOOK_URL; // kosongkan untuk mode polling (lokal)
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 
 if (!TOKEN) {
   console.error('TELEGRAM_BOT_TOKEN belum diset di .env');
