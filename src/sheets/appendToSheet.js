@@ -1,25 +1,12 @@
 const { google } = require('googleapis');
-const zlib = require('zlib'); // <-- Tambahkan modul bawaan ini
+const path = require('path');
 
 function getAuth() {
-  let privateKey = process.env.GOOGLE_SHEETS_PRIVATE_KEY || '';
-
-  // Cek apakah string di-encode dengan Gzip+Base64 (ditandai dengan tidak adanya header standar RSA)
-  if (privateKey && !privateKey.includes('-----BEGIN PRIVATE KEY-----')) {
-    try {
-      const compressedBuffer = Buffer.from(privateKey, 'base64');
-      privateKey = zlib.gunzipSync(compressedBuffer).toString('utf8');
-    } catch (error) {
-      console.error('Gagal men-decode GOOGLE_SHEETS_PRIVATE_KEY menggunakan Gzip:', error.message);
-    }
-  }
-
-  // Bersihkan karakter literal \n menjadi newline sungguhan
-  privateKey = privateKey.replace(/\\n/g, '\n');
+  // Membaca file kredensial JSON langsung dari folder root aplikasi
+  const keyPath = path.join(__dirname, '../../service-account.json');
 
   return new google.auth.JWT({
-    email: process.env.GOOGLE_SHEETS_CLIENT_EMAIL,
-    key: privateKey,
+    keyFile: keyPath,
     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
   });
 }
