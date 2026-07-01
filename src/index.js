@@ -72,3 +72,12 @@ bot.on('polling_error', (err) => {
 bot.on('webhook_error', (err) => {
   console.error('Webhook error:', err.message);
 });
+
+// Amankan server dari crash jika ada error jaringan tak terduga dari API Telegram
+process.on('uncaughtException', (err) => {
+  console.error('Terjadi Uncaught Exception:', err.message);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection di:', promise, 'alasan:', reason);
+});
