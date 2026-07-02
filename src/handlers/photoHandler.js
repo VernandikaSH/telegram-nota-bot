@@ -78,9 +78,12 @@ async function handlePhoto(bot, msg) {
     if (processingMsg) {
       await bot.deleteMessage(chatId, processingMsg.message_id).catch(() => {});
     }
+    const isRateLimit = err.message && err.message.includes('429');
     await bot.sendMessage(
       chatId,
-      '⚠️ Maaf, gagal membaca struk ini. Coba kirim ulang dengan foto yang lebih jelas/tidak buram.'
+      isRateLimit
+        ? '⏳ Bot sedang sibuk (limit AI tercapai). Coba lagi dalam 1-2 menit ya.'
+        : '⚠️ Maaf, gagal membaca struk ini. Coba kirim ulang dengan foto yang lebih jelas/tidak buram.'
     );
   }
 }
