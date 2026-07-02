@@ -1,12 +1,9 @@
 const { google } = require('googleapis');
-const path = require('path');
 
 function getAuth() {
-  // Membaca file kredensial JSON langsung dari folder root aplikasi
-  const keyPath = path.join(__dirname, '../../service-account.json');
-
   return new google.auth.JWT({
-    keyFile: keyPath,
+    email: process.env.GOOGLE_SHEETS_CLIENT_EMAIL,
+    key: process.env.GOOGLE_SHEETS_PRIVATE_KEY.replace(/\\n/g, '\n'),
     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
   });
 }
