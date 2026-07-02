@@ -1,9 +1,16 @@
 const { google } = require('googleapis');
 
 function getAuth() {
+  const credentialsJson = Buffer.from(
+    process.env.GOOGLE_SERVICE_ACCOUNT_BASE64,
+    'base64'
+  ).toString('utf-8');
+
+  const credentials = JSON.parse(credentialsJson);
+
   return new google.auth.JWT({
-    email: process.env.GOOGLE_SHEETS_CLIENT_EMAIL,
-    key: process.env.GOOGLE_SHEETS_PRIVATE_KEY.replace(/\\n/g, '\n'),
+    email: credentials.client_email,
+    key: credentials.private_key,
     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
   });
 }
