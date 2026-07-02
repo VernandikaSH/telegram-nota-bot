@@ -21,11 +21,12 @@ app.use(express.json());
 let bot;
 
 if (WEBHOOK_URL) {
-  // ==== MODE WEBHOOK (production, misalnya di Render) ====
-  bot = new TelegramBot(TOKEN, { webHook: true });
+  bot = new TelegramBot(TOKEN, { webHook: { autoOpen: false } });
   const webhookPath = `/bot${TOKEN}`;
 
-  bot.setWebHook(`${WEBHOOK_URL}${webhookPath}`);
+  bot.setWebHook(`${WEBHOOK_URL}${webhookPath}`)
+    .then(() => console.log('✅ Webhook berhasil didaftarkan:', `${WEBHOOK_URL}${webhookPath}`))
+    .catch((err) => console.error('❌ Gagal daftar webhook:', err.message));
 
   app.post(webhookPath, (req, res) => {
     bot.processUpdate(req.body);
