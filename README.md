@@ -1,155 +1,163 @@
 # Telegram Nota Bot
 
-Bot Telegram pencatat struk otomatis. Cukup **foto struk** → dibaca AI (Gemini) →
-**konfirmasi di chat** → tersimpan rapi ke **Google Sheets** & database.
+Bot Telegram pencatat struk belanja otomatis. Cukup kirim foto struk, bot membacanya dengan AI (Google Gemini), menampilkan ringkasan untuk dikonfirmasi, lalu menyimpannya ke database Supabase dan Google Sheets.
 
-Tidak perlu lagi mencatat pengeluaran manual — semua terjadi dalam satu percakapan
-Telegram, dan hasilnya langsung bisa dibuka sebagai spreadsheet.
+Tujuannya sederhana: tidak perlu lagi mencatat pengeluaran secara manual. Semua terjadi dalam satu percakapan Telegram, dan hasilnya langsung bisa dibuka sebagai spreadsheet.
 
-**Cara kerja singkat:**
+![Kirim Foto ke Telegram](docs/docs1.png)
+![Hasil Scan di Google Sheets](docs/docs2.png)
+![Rekapan Seluruh Nota](docs/docs3.png)
+
+## Cara Kerja
 
 ```
 User kirim foto struk ke bot
         ↓
-Gemini Vision — ekstrak merchant, tanggal, item, total
+Bot ambil foto resolusi tertinggi → kirim ke Gemini (gemini-2.5-flash)
         ↓
-Bot balas preview + tombol [Simpan] / [Batal]
+Gemini mengembalikan data terstruktur (JSON): toko, tanggal, item, subtotal, diskon, pajak, total
         ↓
-User tekan Simpan
+Transaksi disimpan ke Supabase dengan status "pending"
         ↓
-Supabase (database) + Google Sheets (append baris baru)
+Bot membalas ringkasan + tombol [✅ Simpan] / [❌ Batal]
+        ↓
+Simpan → ditulis ke Google Sheets, status jadi "confirmed"
+Batal  → status jadi "cancelled" (tidak ditulis ke Sheets)
 ```
-
----
 
 ## Fitur
 
-- **OCR struk berbasis AI** — Gemini membaca foto struk dan mengubahnya jadi data
-  terstruktur (JSON), bukan sekadar teks mentah
-- **Konfirmasi sebelum simpan** — hasil ekstraksi ditampilkan dulu di chat dengan
-  tombol inline Simpan / Batal, jadi data salah tidak langsung masuk
-- **Dual storage** — tersimpan ke Supabase (query-able) sekaligus Google Sheets
-  (mudah dilihat & dibagikan)
-- **Auto header Sheets** — kolom spreadsheet dibuat otomatis lewat `ensureHeader()`
-- **Dual mode** — polling saat development lokal (tanpa domain publik), webhook
-  saat production. Deteksi otomatis dari ada/tidaknya `WEBHOOK_URL`
-
----
+- **Ekstraksi struk berbasis AI.** Gemini membaca foto struk dan mengubahnya menjadi JSON terstruktur, bukan sekadar teks mentah. Prompt memaksa format JSON yang persis dan melarang model mengarang angka (misalnya pajak diisi `null` kalau tidak tertulis di struk).
+- **Konfirmasi sebelum simpan.** Hasil ekstraksi ditampilkan dulu di chat, jadi data yang salah baca tidak langsung masuk ke spreadsheet.
+- **Status transaksi.** Setiap transaksi punya status `pending` → `confirmed` / `cancelled` di Supabase. Supabase menjadi sumber data utama, Google Sheets sebagai tampilan.
+- **Pencegahan simpan ganda.** Tombol yang ditekan dua kali tidak menulis data dua kali, karena hanya transaksi berstatus `pending` yang bisa diproses.
+- **Penanganan error yang jelas.** Kalau foto tidak terbaca, bot meminta foto ulang. Kalau batas pemakaian AI tercapai (HTTP 429), bot memberi tahu untuk mencoba lagi 1–2 menit kemudian.
+- **Pembersihan output AI.** Gemini kadang membungkus JSON dengan blok markdown walau sudah diminta tidak. Bungkus itu dibuang sebelum di-parse, dan field yang hilang dinormalisasi agar tidak membuat crash.
+- **Google Sheets dengan dua tab:**
+  - **Detail** (default `Sheet1`): satu blok per transaksi berisi info toko, rincian item (qty, harga satuan, jumlah), subtotal, diskon, pajak, dan total, dengan garis pemisah antar blok.
+  - **Ringkasan**: satu baris per transaksi (ID, tanggal, toko, total). Kolom ID berupa hyperlink yang langsung melompat ke blok detailnya.
+  - Tab dan header dibuat otomatis kalau belum ada.
+- **Dua mode jalan.** Polling untuk development lokal (tanpa domain publik) dan webhook untuk production, dipilih otomatis dari ada/tidaknya `WEBHOOK_URL`.
 
 ## Tech Stack
 
 | Layer | Teknologi |
 |---|---|
-| Runtime | Node.js |
-| Bot | Telegram Bot API (polling & webhook) |
-| AI / OCR | Google Gemini (Vision) |
+| Runtime | Node.js 22 |
+| Server | Express (endpoint webhook + health check) |
+| Bot | Telegram Bot API (`node-telegram-bot-api`) |
+| AI | Google Gemini `gemini-2.5-flash` (`@google/generative-ai`) |
 | Database | Supabase (PostgreSQL) |
-| Spreadsheet | Google Sheets API (service account) |
-| Hosting | Render (free tier) |
-| Config | `dotenv` |
+| Spreadsheet | Google Sheets API (`googleapis`, service account) |
+| Deploy | Docker di Render |
 
-**Struktur project:**
+## Struktur Project
 
 ```
 telegram-nota-bot/
 ├── src/
-│   ├── index.js                 → entry point + setup webhook/polling
-│   ├── ai/extractReceipt.js     → kirim gambar ke Gemini, parse jadi JSON
-│   ├── db/supabaseClient.js     → koneksi & query Supabase
-│   ├── sheets/appendToSheet.js  → append data ke Google Sheets
+│   ├── index.js                  → entry point: Express, mode webhook/polling, routing pesan
+│   ├── ai/extractReceipt.js      → prompt + kirim gambar ke Gemini, parse & normalisasi JSON
+│   ├── db/supabaseClient.js      → simpan transaksi pending, ambil, dan update status
+│   ├── sheets/appendToSheet.js   → tulis blok detail + baris ringkasan ke Google Sheets
 │   └── handlers/
-│       ├── photoHandler.js      → saat foto struk diterima
-│       └── callbackHandler.js   → saat tombol Simpan/Batal ditekan
+│       ├── photoHandler.js       → saat foto struk diterima
+│       └── callbackHandler.js    → saat tombol Simpan/Batal ditekan
+├── Dockerfile
 ├── package.json
 ├── .env.example
 └── .gitignore
 ```
 
----
+## Environment Variables
 
-## Langkah Pengerjaan (Ringkas)
+| Variabel | Wajib | Keterangan |
+|---|---|---|
+| `TELEGRAM_BOT_TOKEN` | Ya | Token bot dari @BotFather |
+| `GEMINI_API_KEY` | Ya | API key dari Google AI Studio |
+| `SUPABASE_URL` | Ya | Supabase → Project Settings → API |
+| `SUPABASE_KEY` | Ya | Service role key (hanya dipakai di server, jangan pernah dibagikan) |
+| `GOOGLE_SERVICE_ACCOUNT_BASE64` | Ya | Seluruh isi file JSON service account Google, di-encode base64 |
+| `SPREADSHEET_ID` | Ya | ID dari URL Google Sheets tujuan |
+| `WEBHOOK_URL` | Production | URL publik service, tanpa garis miring di akhir. Kosongkan saat lokal agar bot memakai polling |
+| `SHEET_NAME` | Tidak | Nama tab detail (default `Sheet1`) |
+| `SUMMARY_SHEET_NAME` | Tidak | Nama tab ringkasan (default `Ringkasan`) |
+| `PORT` | Tidak | Port server (default `8080`) |
 
-**1. Install dependency**
+Cara membuat `GOOGLE_SERVICE_ACCOUNT_BASE64` dari file JSON service account:
+
+```bash
+# macOS / Linux
+base64 -w 0 service-account.json      # di macOS: base64 -i service-account.json
+```
+
+```powershell
+# Windows PowerShell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("service-account.json"))
+```
+
+## Setup
+
+### 1. Supabase
+
+Buat tabel `transactions` dengan kolom berikut (sesuaikan dengan schema yang dipakai):
+
+| Kolom | Tipe |
+|---|---|
+| `id` | bigint, primary key, auto increment |
+| `telegram_user_id` | text |
+| `store_name` | text |
+| `transaction_date` | date |
+| `items` | jsonb |
+| `subtotal`, `discount`, `tax`, `total` | numeric |
+| `status` | text (`pending` / `confirmed` / `cancelled`) |
+| `created_at` | timestamptz, default `now()` |
+
+### 2. Google Sheets
+
+1. Buat service account di Google Cloud dan aktifkan Google Sheets API.
+2. Download file JSON kredensialnya, lalu ubah ke base64 (lihat di atas).
+3. **Share spreadsheet tujuan ke email service account** (`client_email` di file JSON) dengan akses Editor. Tanpa ini, penyimpanan akan gagal dengan *permission denied*.
+
+### 3. Jalankan lokal (mode polling)
+
 ```bash
 npm install
-```
-
-**2. Setup kredensial**
-```bash
-cp .env.example .env
-```
-Isi tiap variabel:
-
-| Variabel | Sumber |
-|---|---|
-| `TELEGRAM_BOT_TOKEN` | @BotFather |
-| `GEMINI_API_KEY` | Google AI Studio |
-| `SUPABASE_URL` / `SUPABASE_KEY` | Supabase → Project Settings → API (**service_role key**) |
-| `GOOGLE_SHEETS_CLIENT_EMAIL` / `GOOGLE_SHEETS_PRIVATE_KEY` | file JSON service account |
-| `SPREADSHEET_ID` | dari URL Google Sheets tujuan |
-| `WEBHOOK_URL` | **kosongkan saat lokal** → bot otomatis pakai polling |
-
-**3. (Opsional) Buat header Google Sheets — sekali saja**
-```bash
-node -e "require('dotenv').config(); require('./src/sheets/appendToSheet').ensureHeader().then(() => console.log('Header dibuat')).catch(console.error)"
-```
-
-**4. Jalankan lokal (mode polling)**
-```bash
+cp .env.example .env     # isi semua variabel, kosongkan WEBHOOK_URL
 npm start
 ```
-Buka Telegram → chat bot → `/start` → kirim foto struk. Tidak butuh domain publik
-karena bot "menjemput" update lewat polling.
 
-**5. Deploy ke Render (mode webhook)**
-1. Push ke GitHub (pastikan `.env` **tidak ikut ter-commit** — sudah ada di `.gitignore`)
-2. Render → **New → Web Service** → hubungkan ke repo
-3. Setting: Build Command `npm install`, Start Command `npm start`, Environment `Node`
-4. Tab **Environment** → masukkan semua variabel dari `.env`, termasuk `WEBHOOK_URL`
-   (isi setelah deploy pertama berhasil, tanpa trailing slash):
+Buka Telegram → chat bot → `/start` → kirim foto struk. Mode polling tidak butuh domain publik.
+
+Alternatif dengan Docker:
+
+```bash
+docker build -t nota-bot .
+docker run --env-file .env -p 8080:8080 nota-bot
 ```
-   WEBHOOK_URL=https://telegram-nota-bot.onrender.com
-```
-5. Deploy → bot otomatis mendaftarkan webhook ke Telegram saat server start
-6. Cek log Render — harus muncul `Bot berjalan dalam mode WEBHOOK`
-7. Test kirim foto struk dari Telegram
 
----
+## Deploy ke Render (Docker)
 
-## Catatan
+1. Push repo ke GitHub (pastikan `.env` tidak ikut ter-commit).
+2. Render → **New → Web Service** → hubungkan repo → pilih runtime **Docker**. Render otomatis memakai `Dockerfile` di root repo.
+3. Masukkan semua environment variable di tab **Environment**.
+4. Setelah deploy pertama berhasil, isi `WEBHOOK_URL` dengan URL service, misalnya `https://telegram-nota-bot.onrender.com`, lalu deploy ulang. Bot otomatis mendaftarkan webhook ke Telegram saat start.
+5. Cek log: harus muncul `Bot berjalan dalam mode WEBHOOK`.
 
-- **Format `GOOGLE_SHEETS_PRIVATE_KEY`:** di `.env`, private key harus **satu baris**
-  dengan `\n` literal (bukan newline asli). Kode sudah otomatis mengonversinya jadi
-  newline sungguhan saat runtime, jadi tinggal copy-paste value `private_key` dari JSON
-  apa adanya (termasuk tanda kutip luar):
-```
-  GOOGLE_SHEETS_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nMIIEvQ...\n-----END PRIVATE KEY-----\n"
-```
-- **Spreadsheet wajib di-share** ke email service account (`client_email`) dengan akses
-  **Editor** — kalau tidak, akan muncul `permission denied` saat simpan.
-- **Cold start Render free tier:** service "tidur" setelah idle, dan butuh beberapa detik
-  untuk bangun saat menerima webhook pertama. Ini normal — request berikutnya cepat.
-- **Kualitas foto menentukan hasil.** Struk buram / miring / terpotong sering bikin Gemini
-  gagal parse JSON. Foto tegak lurus dengan pencahayaan cukup.
-- **Debugging bot diam total:** biasanya token salah atau webhook lama masih terdaftar.
-  Jalankan mode polling dulu (kosongkan `WEBHOOK_URL`) untuk mengisolasi masalah.
-- **Error `relation does not exist`** → tabel `transactions` belum dibuat di Supabase.
-  Jalankan ulang SQL schema di SQL Editor.
+Endpoint `GET /` dipakai sebagai health check.
 
----
+## Catatan & Troubleshooting
 
-## Saran Pengembangan
+- **Kualitas foto menentukan hasil.** Struk buram, miring, atau terpotong sering membuat Gemini gagal menghasilkan JSON yang valid. Bot akan meminta foto ulang.
+- **Cold start Render free tier.** Service tidur setelah idle, jadi pesan pertama butuh beberapa detik untuk dibalas.
+- **Bot diam total.** Biasanya token salah atau webhook lama masih terdaftar. Coba jalankan mode polling dulu (kosongkan `WEBHOOK_URL`) untuk mengisolasi masalah.
+- **Error `relation "transactions" does not exist`.** Tabel belum dibuat di Supabase.
 
-- **Edit sebelum simpan** — sekarang hanya bisa Simpan / Batal. Tambahkan tombol edit
-  agar user bisa mengoreksi total atau nama merchant yang salah baca tanpa foto ulang.
-- **Kategorisasi otomatis** — minta Gemini sekalian mengklasifikasikan struk
-  (makanan / transport / belanja), lalu tampilkan rekap bulanan lewat command `/rekap`.
-- **Retry & fallback parse** — kalau JSON dari Gemini gagal di-parse, coba ulang sekali
-  dengan prompt yang lebih ketat sebelum menyerah ke user.
-- **Deteksi duplikat** — cegah struk yang sama ter-input dua kali (cek hash gambar atau
-  kombinasi merchant + tanggal + total).
-- **Multi-user** — saat ini asumsinya satu user/satu sheet. Bisa dikembangkan agar tiap
-  `chat_id` punya spreadsheet & tabel sendiri.
-- **Anti cold-start** — pakai cron job (mis. UptimeRobot / cron-job.org) untuk ping
-  service tiap ~10 menit agar Render tidak tidur.
-- **Export & laporan** — command untuk mengunduh rekap bulanan sebagai CSV/PDF.
+## Keterbatasan & Rencana Pengembangan
+
+- **Belum ada fitur edit.** Kalau Gemini salah baca, saat ini hanya bisa Batal lalu foto ulang. Rencananya ada tombol edit untuk mengoreksi total atau nama toko langsung di chat.
+- **Belum ada fitur hapus setelah disimpan.** Menghapus baris langsung di Google Sheets membuat data tidak sinkron dengan Supabase. Rencananya ada command `/batal <ID>` yang mengubah status menjadi `cancelled` di Supabase dan menandai baris di Sheets.
+- **Transaksi `pending` yang tidak dikonfirmasi tidak dibersihkan.** Perlu job berkala untuk menghapus atau membatalkan transaksi pending yang sudah lama.
+- **Validasi hasil AI.** Total yang tidak terbaca saat ini diisi 0. Lebih baik dicocokkan dengan jumlah harga item, atau diminta foto ulang. Gemini juga mendukung *structured output* (`responseMimeType` + `responseSchema`) yang bisa menggantikan pembersihan JSON manual.
+- **Kategorisasi & rekap.** Klasifikasi otomatis (makanan, transport, belanja) dan command `/rekap` untuk ringkasan bulanan.
+- **Multi-user.** Saat ini satu spreadsheet untuk semua pengguna. Bisa dikembangkan agar setiap `telegram_user_id` punya spreadsheet sendiri.
