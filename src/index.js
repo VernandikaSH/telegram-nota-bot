@@ -25,7 +25,7 @@ if (WEBHOOK_URL) {
   const webhookPath = `/bot${TOKEN}`;
 
   bot.setWebHook(`${WEBHOOK_URL}${webhookPath}`)
-    .then(() => console.log('✅ Webhook berhasil didaftarkan:', `${WEBHOOK_URL}${webhookPath}`))
+    .then(() => console.log('✅ Webhook berhasil didaftarkan'))
     .catch((err) => console.error('❌ Gagal daftar webhook:', err.message));
 
   app.post(webhookPath, (req, res) => {
